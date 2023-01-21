@@ -41,6 +41,7 @@ INSTALLED_APPS = [
     # 3rd party apps
     "rest_framework",
     "drf_yasg",
+    "django_filters",
     # local apps
     "images",
 ]
