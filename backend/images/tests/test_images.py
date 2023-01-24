@@ -1,6 +1,9 @@
 import pytest
 from images.models import Image
+from moto import mock_s3
 from PIL import Image as PILImage
+
+# Test not allowed HTTP methods
 
 
 @pytest.mark.django_db
@@ -21,14 +24,13 @@ def test_images__delete_method_is_not_available__should_return_405(client):
     assert response.status_code == 405
 
 
-@pytest.mark.django_db
-def test_images__get_method_is_available__should_return_200(client):
-    response = client.get("/api/images/")
-    assert response.status_code == 200
+# Test get images
 
 
+@mock_s3
 @pytest.mark.django_db
-def test_images__get_images__should_list_images(client, image_factory):
+def test_images__get_images__should_list_images(client, image_factory, s3, settings):
+    s3.create_bucket(Bucket=settings.AWS_STORAGE_BUCKET_NAME)
     image = image_factory()
     response = client.get("/api/images/")
     assert response.status_code == 200
@@ -36,10 +38,12 @@ def test_images__get_images__should_list_images(client, image_factory):
     assert response.json()["results"][0]["title"] == image.title
 
 
+@mock_s3
 @pytest.mark.django_db
 def test_images__get_images_filter_by_title__should_list_images_meeting_criteria(
-    client, image_factory
+    client, image_factory, s3, settings
 ):
+    s3.create_bucket(Bucket=settings.AWS_STORAGE_BUCKET_NAME)
     image = image_factory(title="My Beautiful Image")
     image_factory()
     response = client.get("/api/images/?title=beaut")
@@ -48,10 +52,12 @@ def test_images__get_images_filter_by_title__should_list_images_meeting_criteria
     assert response.json()["results"][0]["title"] == image.title
 
 
+@mock_s3
 @pytest.mark.django_db
 def test_images__get_images_pagination__should_paginate_resulting_data(
-    client, image_factory
+    client, image_factory, s3, settings
 ):
+    s3.create_bucket(Bucket=settings.AWS_STORAGE_BUCKET_NAME)
     image_factory()
     image_factory()
     response = client.get("/api/images/")
@@ -61,27 +67,38 @@ def test_images__get_images_pagination__should_paginate_resulting_data(
     assert len(response.json()["results"]) == 1
 
 
+@mock_s3
 @pytest.mark.django_db
 def test_images__get_images_by_existing_id__should_return_image_data(
-    client, image_factory
+    client, image_factory, s3, settings
 ):
+    s3.create_bucket(Bucket=settings.AWS_STORAGE_BUCKET_NAME)
     image = image_factory()
     response = client.get(f"/api/images/{image.id}/")
     assert response.status_code == 200
     assert response.json()["title"] == image.title
 
 
+@mock_s3
 @pytest.mark.django_db
 def test_images__get_images_by_non_existing_id__should_return_404(
-    client, image_factory
+    client, image_factory, s3, settings
 ):
+    s3.create_bucket(Bucket=settings.AWS_STORAGE_BUCKET_NAME)
     image = image_factory()
     response = client.get(f"/api/images/{image.id + 1}/")
     assert response.status_code == 404
 
 
+# Test adding new images
+
+
+@mock_s3
 @pytest.mark.django_db
-def test_images__add_image__image_is_added_successfully(client, image_file):
+def test_images__add_image__image_is_added_successfully(
+    client, image_file, s3, settings
+):
+    s3.create_bucket(Bucket=settings.AWS_STORAGE_BUCKET_NAME)
     data = {"title": "test", "width": 2, "height": 2, "image_file": image_file}
     response = client.post("/api/images/", data=data)
     assert response.status_code == 201
@@ -138,7 +155,42 @@ def test_images__add_image_negative_width_height_data__image_addition_fails(
 
 
 @pytest.mark.django_db
-def test_images__add_image_resizes_image__image_is_resized(client, image_file):
+def test_images__add_image_not_allowed_file_extension__image_addition_fails(
+    client, text_file
+):
+    data = {"title": "test", "width": 2, "height": 2, "image_file": text_file}
+    response = client.post("/api/images/", data=data)
+    assert response.status_code == 400
+    assert response.json()["image_file"] == [
+        "Upload a valid image. The file you uploaded was either not an image or a corrupted image."
+    ]
+    assert Image.objects.count() == 0
+
+
+@pytest.mark.django_db
+def test_images__add_image_not_allowed_file_format__image_addition_fails(
+    client, text_file_image_extension
+):
+    data = {
+        "title": "test",
+        "width": 2,
+        "height": 2,
+        "image_file": text_file_image_extension,
+    }
+    response = client.post("/api/images/", data=data)
+    assert response.status_code == 400
+    assert response.json()["image_file"] == [
+        "Upload a valid image. The file you uploaded was either not an image or a corrupted image."
+    ]
+    assert Image.objects.count() == 0
+
+
+@mock_s3
+@pytest.mark.django_db
+def test_images__add_image_resizes_image__image_is_resized(
+    client, image_file, s3, settings
+):
+    s3.create_bucket(Bucket=settings.AWS_STORAGE_BUCKET_NAME)
     data = {"title": "test", "width": 150, "height": 150, "image_file": image_file}
     response = client.post("/api/images/", data=data)
     image = PILImage.open(image_file)
